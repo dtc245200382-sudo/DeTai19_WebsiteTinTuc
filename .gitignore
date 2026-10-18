@@ -3,3 +3,10 @@
 *.sql
 *.sql.gz
 .DS_Store
+
+# Environment secrets
+.env
+
+# MySQL Exporter credentials
+mysql-exporter/.my.cnf
+**/.my.cnf
