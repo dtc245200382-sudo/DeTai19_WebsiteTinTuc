@@ -1,42 +1,42 @@
 # Đề tài 19 – Website Tin tức / Cổng thông tin
 
-Triển khai website tin tức WordPress bằng Docker Compose, kết hợp Nginx Reverse Proxy, MySQL, phpMyAdmin, giám sát Prometheus/Grafana, thu thập log Loki/Promtail và các biện pháp hardening cơ bản.
+Triển khai **WordPress + MySQL + Nginx Reverse Proxy** bằng Docker Compose, tích hợp **Prometheus/Grafana** để giám sát, **Loki/Promtail** để thu thập log và các biện pháp **hardening** cơ bản.
 
-> Dự án thực hành học phần Triển khai và Quản trị Hệ thống Phần mềm. Cấu hình hiện tại ưu tiên môi trường local/lab; chưa phải cấu hình production hoàn chỉnh.
+> **Phạm vi:** bài thực hành học phần Triển khai và Quản trị Hệ thống Phần mềm, chạy trên máy cá nhân (ưu tiên Windows + Docker Desktop). Đây **không phải** cấu hình production hoàn chỉnh. Các bước dưới đây mô tả cấu hình đang có trong repository và những thao tác cần thực hiện thủ công khi dựng môi trường mới.
 
-## 1. Kiến trúc hệ thống
+## 1. Kiến trúc
 
 ```text
-Trình duyệt ──HTTP :80──> Nginx ──> WordPress ──> MySQL
-                              │
-                              └── access/error logs ──> Promtail ──> Loki ──> Grafana
+Trình duyệt -- HTTP :80 --> Nginx --> WordPress --> MySQL
+                              |
+                              +--> access/error log --> Promtail --> Loki --> Grafana Explore
 
-Nginx /stub_status ──> Nginx Exporter ──┐
-MySQL ──> MySQL Exporter ────────────────┼──> Prometheus ──> Grafana
-Docker ──> cAdvisor ────────────────────┘
+Nginx /stub_status --> Nginx Exporter --+
+MySQL --------------> MySQL Exporter --+--> Prometheus --> Grafana Dashboard
+Docker --------------> cAdvisor -------+
 ```
 
-Docker Compose quản lý 11 dịch vụ, chia thành các mạng `edge`, `data`, `monitoring`. phpMyAdmin nằm trong mạng Docker và chưa có đường truy cập công khai qua Nginx.
+Docker Compose quản lý **11 dịch vụ** trên ba mạng `edge`, `data`, `monitoring`. WordPress và phpMyAdmin kết nối MySQL qua mạng `data`; Nginx phục vụ website trên cổng 80. phpMyAdmin **chưa có đường truy cập từ host** trong Compose hiện tại.
 
-## 2. Công nghệ
+## 2. Thành phần và phiên bản
 
-| Thành phần | Image / phiên bản | Vai trò |
+| Dịch vụ | Docker image | Vai trò |
 |---|---|---|
 | WordPress | `wordpress:php8.3-apache` | Website tin tức |
-| MySQL | `mysql:8.4` | Cơ sở dữ liệu |
-| phpMyAdmin | `phpmyadmin:5.2-apache` | Quản trị MySQL trong mạng nội bộ |
+| MySQL | `mysql:8.4` | Lưu trữ dữ liệu |
+| phpMyAdmin | `phpmyadmin:5.2-apache` | Quản trị DB nội bộ |
 | Nginx | `nginx:1.27-alpine` | Reverse proxy, security headers, rate limiting |
 | Prometheus | `prom/prometheus:v3.5.0` | Thu thập metrics |
-| Grafana | `grafana/grafana:12.1.1` | Dashboard metrics và tra cứu log |
+| Grafana | `grafana/grafana:12.1.1` | Dashboard và Explore |
 | cAdvisor | `ghcr.io/google/cadvisor:v0.53.0` | Metrics môi trường container |
 | Nginx Exporter | `nginx/nginx-prometheus-exporter:1.4.2` | Metrics Nginx |
 | MySQL Exporter | `prom/mysqld-exporter:v0.17.2` | Metrics MySQL |
 | Loki | `grafana/loki:3.5.0` | Lưu trữ và truy vấn log |
-| Promtail | `grafana/promtail:3.5.0` | Thu thập log Nginx và chuyển đến Loki |
+| Promtail | `grafana/promtail:3.5.0` | Đọc log Nginx, đẩy sang Loki |
 
-> Trên Docker Desktop/Windows, cAdvisor có thể chỉ hiển thị metrics ở mức môi trường Docker thay vì từng container theo tên.
+> Promtail đã hết vòng đời hỗ trợ; dự án giữ Promtail để đáp ứng yêu cầu bài thực hành. Khi triển khai mới trong thực tế, nên cân nhắc Grafana Alloy.
 
-## 3. Cấu trúc thư mục
+## 3. Cấu trúc repository
 
 ```text
 DeTai19_WebsiteTinTuc/
@@ -44,66 +44,105 @@ DeTai19_WebsiteTinTuc/
 ├── .gitignore
 ├── docker-compose.yml
 ├── README.md
-├── nginx/
-│   └── nginx.conf
-├── prometheus/
-│   └── prometheus.yml
-├── grafana/
-│   └── detai19-dashboard.json
-├── loki/
-│   └── loki-config.yml
-├── promtail/
-│   └── promtail-config.yml
+├── nginx/nginx.conf
+├── prometheus/prometheus.yml
+├── grafana/detai19-dashboard.json
+├── loki/loki-config.yml
+├── promtail/promtail-config.yml
 └── mysql-exporter/
-    └── .my.cnf             # Tạo cục bộ, không commit
+    └── .my.cnf               # Tự tạo trên máy, KHÔNG commit
 ```
 
-## 4. Yêu cầu trước khi chạy
+Các file `.env` và `mysql-exporter/.my.cnf` chứa thông tin nhạy cảm, phải được tạo cục bộ và không đưa lên Git.
 
-- Docker Desktop với Docker Compose V2.
-- Git và trình duyệt web.
-- Cổng `80`, `3000`, `9090` trên máy không bị ứng dụng khác chiếm dụng.
-- PowerShell nếu chạy trên Windows.
+## 4. Yêu cầu môi trường
 
-## 5. Cài đặt và khởi động
+- Docker Desktop đang chạy **Linux containers**, Docker Compose V2 (`docker compose version`).
+- Git, trình duyệt web; PowerShell nếu dùng Windows.
+- Các cổng host `80`, `3000`, `9090` chưa bị ứng dụng khác chiếm dụng.
+- Đủ tài nguyên cho 11 container; lần đầu cần Internet để tải Docker images.
 
-### Bước 1: Clone repository
+Kiểm tra nhanh:
+
+```powershell
+docker version
+docker compose version
+```
+
+## 5. Cài đặt lần đầu
+
+### 5.1. Clone và tạo `.env`
 
 ```powershell
 git clone https://github.com/dtc245200382-sudo/DeTai19_WebsiteTinTuc.git
 cd DeTai19_WebsiteTinTuc
-```
-
-### Bước 2: Tạo biến môi trường
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-Mở `.env`, thay mật khẩu mẫu bằng mật khẩu mạnh. File `docker-compose.yml` hiện tại cũng yêu cầu hai biến Grafana; thêm vào `.env`:
+Mở `.env`, thay các mật khẩu mẫu bằng giá trị riêng và **thêm hai biến Grafana** (hiện chưa có trong `.env.example` của repository):
 
 ```dotenv
+MYSQL_DATABASE=news_db
+MYSQL_USER=news_user
+MYSQL_PASSWORD=THAY_MAT_KHAU_UNG_DUNG
+MYSQL_ROOT_PASSWORD=THAY_MAT_KHAU_ROOT
 GRAFANA_ADMIN_USER=admin
-GRAFANA_ADMIN_PASSWORD=THAY_BANG_MAT_KHAU_MANH
+GRAFANA_ADMIN_PASSWORD=THAY_MAT_KHAU_GRAFANA
 ```
 
-Giữ các biến `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` trong `.env.example` và thay giá trị mật khẩu mẫu. Không commit `.env`.
+**Không commit** `.env`. Tránh dùng ký tự gây khó khăn khi nội suy biến trong Docker Compose nếu chưa kiểm tra bằng `docker compose config`.
 
-### Bước 3: Cấu hình MySQL Exporter
+### 5.2. Khởi động database trước
 
-Compose yêu cầu file cục bộ `mysql-exporter/.my.cnf` (không có trong Git). Tạo thư mục và file này, dùng thông tin tài khoản MySQL có quyền đọc metrics phù hợp:
+```powershell
+docker compose config --quiet
+docker compose up -d mysql
+docker compose ps mysql
+```
+
+Đợi MySQL chuyển sang trạng thái `healthy` trước khi tạo tài khoản exporter.
+
+### 5.3. Tạo tài khoản chỉ đọc metrics cho MySQL Exporter
+
+Dùng mật khẩu riêng cho exporter. Ví dụ, mở MySQL CLI trong container:
+
+```powershell
+docker compose exec mysql mysql -u root -p
+```
+
+Nhập mật khẩu `MYSQL_ROOT_PASSWORD` khi được hỏi, sau đó chạy SQL (thay `MAT_KHAU_EXPORTER_RIENG`):
+
+```sql
+CREATE USER IF NOT EXISTS 'exporter'@'%' IDENTIFIED BY 'MAT_KHAU_EXPORTER_RIENG';
+GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'%';
+```
+
+Các quyền này phục vụ mục đích thực hành metrics; khi đưa lên môi trường thực tế, rà soát lại theo nguyên tắc tối thiểu quyền. Nếu user đã tồn tại, `CREATE USER IF NOT EXISTS` không cập nhật mật khẩu cũ; cần đồng bộ mật khẩu bằng `ALTER USER` khi cần.
+
+Thoát MySQL bằng `exit;`. Tạo file **`mysql-exporter/.my.cnf`** với nội dung (không commit):
 
 ```ini
 [client]
-user=TEN_TAI_KHOAN_EXPORTER
-password=MAT_KHAU_EXPORTER
+user=exporter
+password=MAT_KHAU_EXPORTER_RIENG
 host=mysql
 port=3306
 ```
 
-Tài khoản exporter cần được tạo trong MySQL trước khi khởi động exporter. Nên dùng tài khoản chuyên dụng với quyền tối thiểu, không dùng tài khoản root. Không commit `.my.cnf` hoặc đưa mật khẩu thật vào tài liệu.
+Tạo thư mục nếu chưa có:
 
-### Bước 4: Kiểm tra và khởi động
+```powershell
+New-Item -ItemType Directory -Force mysql-exporter | Out-Null
+notepad .\mysql-exporter\.my.cnf
+```
+
+Xác nhận file được Git bỏ qua:
+
+```powershell
+git check-ignore mysql-exporter/.my.cnf
+```
+
+### 5.4. Khởi động các dịch vụ
 
 ```powershell
 docker compose config --quiet
@@ -111,143 +150,239 @@ docker compose up -d
 docker compose ps
 ```
 
-Trên môi trường mới, đợi MySQL healthy và hoàn tất cài đặt WordPress trong trình duyệt.
+Truy cập `http://localhost` để hoàn thành màn hình cài đặt WordPress trên **database mới** (chọn ngôn ngữ, tên website, tài khoản quản trị và mật khẩu). Không đưa mật khẩu quản trị WordPress vào repository.
 
-## 6. Địa chỉ truy cập
+**Lưu ý khi triển khai lại:** dữ liệu WordPress nằm trong Docker volumes; clone repository không tự có các bài viết, tài khoản và dữ liệu đã tạo trên máy tác giả.
 
-| Dịch vụ | Địa chỉ |
-|---|---|
-| Website | http://localhost |
-| WordPress Admin | http://localhost/wp-admin |
-| Grafana | http://localhost:3000 |
-| Prometheus | http://localhost:9090 |
-| Prometheus Targets | http://localhost:9090/targets |
+## 6. Địa chỉ và phạm vi truy cập
 
-Grafana và Prometheus chỉ được bind tới `127.0.0.1` trên máy chủ. MySQL, phpMyAdmin và Loki không được publish trực tiếp ra host trong cấu hình Compose hiện tại. Đường dẫn phpMyAdmin qua reverse proxy chưa được cấu hình.
+| Thành phần | URL từ máy host | Ghi chú |
+|---|---|---|
+| Website | http://localhost | Qua Nginx cổng 80 |
+| WordPress Admin | http://localhost/wp-admin | Tài khoản tạo lúc cài WordPress |
+| Grafana | http://localhost:3000 | Bind `127.0.0.1` |
+| Prometheus | http://localhost:9090 | Bind `127.0.0.1` |
+| Prometheus Targets | http://localhost:9090/targets | Xem target UP/DOWN |
+| phpMyAdmin | Chưa có URL host | Chỉ ở mạng Docker |
+| Loki | Không publish ra host | Grafana truy cập `http://loki:3100` |
+| MySQL | Không publish ra host | Container nội bộ |
 
-## 7. Monitoring với Prometheus và Grafana
+Cổng Nginx `80:80` hiện được publish trên các giao diện host, không giới hạn `127.0.0.1`. Khi chỉ chạy lab cá nhân, cân nhắc giới hạn thành `127.0.0.1:80:80` nếu không cần truy cập từ máy khác.
 
-Prometheus thu thập bốn nhóm target: `prometheus`, `cadvisor`, `nginx`, `mysql`.
+## 7. Monitoring: Prometheus + Grafana
 
-1. Mở http://localhost:9090/targets và kiểm tra các target `UP`.
-2. Mở Grafana tại http://localhost:3000 và đăng nhập bằng thông tin trong `.env`.
-3. Cấu hình Prometheus datasource URL: `http://prometheus:9090`.
-4. Import dashboard từ `grafana/detai19-dashboard.json` và chọn datasource Prometheus.
+Prometheus scrape bốn nhóm: `prometheus`, `cadvisor`, `nginx`, `mysql`.
 
-Một số PromQL dùng để xác minh:
+1. Mở `http://localhost:9090/targets`, kiểm tra các target mong đợi ở trạng thái **UP**.
+2. Mở Grafana `http://localhost:3000`, đăng nhập bằng `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`.
+3. **Connections → Data sources → Add new data source → Prometheus**; nhập URL `http://prometheus:9090`, **Save & test**.
+4. **Dashboards → New → Import**, tải `grafana/detai19-dashboard.json`, chọn datasource Prometheus và lưu.
+
+PromQL để kiểm thử:
 
 ```promql
 up
 nginx_up
 mysql_up
+rate(mysql_global_status_questions[5m])
+mysql_global_status_threads_connected
 ```
 
-`nginx_up = 1` thể hiện Nginx Exporter đọc được trạng thái Nginx. `mysql_up = 1` thể hiện MySQL Exporter kết nối được MySQL.
+`nginx_up = 1` và `mysql_up = 1` cho biết exporter tương ứng đang lấy metrics thành công. Dashboard đã xuất JSON, nhưng **chưa có Grafana provisioning tự động**; máy mới phải thêm datasource/import dashboard thủ công.
 
-## 8. Centralized Logging với Loki và Promtail
+**Giới hạn đã gặp:** trên Docker Desktop/Windows, cAdvisor có thể chỉ báo metrics tổng hợp môi trường Docker, không liệt kê đầy đủ metrics của từng container. Không nên tuyên bố giám sát từng container thành công nếu thực tế chỉ có metrics tổng hợp.
 
-Nginx ghi access/error log vào volume `nginx_logs`. Promtail đọc volume này ở chế độ read-only, gắn nhãn `job="nginx"`, `service="nginx"` rồi gửi log tới Loki.
+## 8. Centralized Logging: Loki + Promtail
 
-Trong Grafana:
+Nginx cấu hình ghi `access.log` và `error.log` vào `/var/log/nginx`; Compose gắn volume `nginx_logs` vào Nginx và mount **read-only** vào Promtail. Promtail đọc `/var/log/nginx/*.log`, gắn nhãn `job="nginx"`, `service="nginx"` và gửi tới `http://loki:3100/loki/api/v1/push`.
 
-1. Thêm Loki datasource URL: `http://loki:3100`.
-2. Vào **Explore**, chọn datasource Loki.
-3. Thực hiện các truy vấn LogQL:
+### 8.1. Điểm cần kiểm tra khi dựng môi trường mới
 
-**Xem toàn bộ log Nginx**
+Image Nginx chính thức có thể tạo **symlink** `access.log -> /dev/stdout` và `error.log -> /dev/stderr`. Nếu symlink còn tồn tại, Promtail đọc file trong shared volume có thể không hoạt động như mong đợi. **Repository hiện chưa có cơ chế tự động chuyển symlink thành file thực**; kiểm tra sau khi khởi động:
+
+```powershell
+docker compose exec nginx ls -l /var/log/nginx/
+```
+
+Nếu cả hai đường dẫn là symlink, với môi trường lab này có thể sửa trong volume rồi yêu cầu Nginx mở lại log:
+
+```powershell
+docker compose exec nginx sh -c "rm /var/log/nginx/access.log /var/log/nginx/error.log && touch /var/log/nginx/access.log /var/log/nginx/error.log"
+docker compose exec nginx nginx -s reopen
+```
+
+**Chỉ thực hiện thao tác này khi đã xác nhận chúng là symlink**, không áp dụng tùy tiện cho file log đang có dữ liệu cần giữ. Đây là cách xử lý thủ công cho lab, chưa phải giải pháp tự động/production. Khi xóa và tạo lại volume log, cần kiểm tra lại.
+
+Tạo lưu lượng và xem log:
+
+```powershell
+1..5 | ForEach-Object { curl.exe -s -o NUL http://localhost/ }
+docker compose exec nginx tail -n 10 /var/log/nginx/access.log
+docker compose logs --tail=30 promtail
+docker compose logs --tail=30 loki
+```
+
+### 8.2. Kết nối Loki với Grafana
+
+Trong Grafana: **Connections → Data sources → Add new data source → Loki**. Nhập URL `http://loki:3100` rồi **Save & test**. Mở **Explore**, chọn datasource Loki, thời gian **Last 15 minutes**.
+
+Ba ví dụ LogQL:
+
+**Xem log Nginx**
 
 ```logql
 {job="nginx"}
 ```
 
-**Lọc các yêu cầu HTTP 404**
+**Lọc các request GET**
 
 ```logql
-{job="nginx"} |= " 404 "
+{job="nginx"} |= "GET"
 ```
 
-**Đếm số log theo phút**
+**Đếm số dòng log trong mỗi phút**
 
 ```logql
 sum(count_over_time({job="nginx"}[1m]))
 ```
 
-Tạo một URL không tồn tại trên website để sinh log 404, ví dụ `http://localhost/duong-dan-khong-ton-tai-12345`.
+**Lọc dòng access log có mã 404**
 
-## 9. Hardening – bảo mật cơ bản
+```logql
+{job="nginx"} |= " 404 "
+```
 
-Cấu hình tại `nginx/nginx.conf`:
+Để tạo log 404 thử nghiệm:
 
-| Biện pháp | Cấu hình / mục đích |
+```powershell
+curl.exe -s -o NUL -w "%{http_code}`n" http://localhost/duong-dan-khong-ton-tai-12345
+```
+
+Nếu chưa thấy log, kiểm tra **time range**, file log thật hay symlink, log Promtail và trạng thái Loki. Chỉ coi logging hoàn tất sau khi **truy vấn Explore trả về log**.
+
+## 9. Hardening và kiểm thử bảo mật
+
+Cấu hình bảo mật Nginx hiện có trong `nginx/nginx.conf`:
+
+| Biện pháp | Cấu hình |
 |---|---|
-| Security headers | `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin` |
+| Security headers | `X-Content-Type-Options: nosniff`; `X-Frame-Options: SAMEORIGIN`; `Referrer-Policy: strict-origin-when-cross-origin` |
 | Ẩn phiên bản Nginx | `server_tokens off` |
-| Chặn file ẩn | Từ chối truy cập các đường dẫn dạng `/.env`, ngoại trừ `.well-known` |
-| Rate limiting | `10r/s` trên mỗi IP, `burst=20 nodelay`, trả HTTP `429` khi vượt giới hạn |
-| Giảm bề mặt truy cập | Grafana/Prometheus chỉ bind localhost; MySQL không publish port ra host |
-| Tách mạng và bảo vệ bí mật | Các mạng Docker riêng; `.env` và `.my.cnf` không commit |
+| Chặn file/thư mục ẩn | `location` chặn đường dẫn như `/.env`, ngoại lệ `.well-known` |
+| Rate limiting | `10r/s` mỗi IP, `burst=20 nodelay`, trả HTTP `429` khi vượt ngưỡng |
+| Giảm bề mặt truy cập | MySQL/Loki không publish host; Grafana/Prometheus chỉ bind localhost |
+| Bí mật | `.env`, `mysql-exporter/.my.cnf` nằm ngoài Git |
 
-Kiểm thử đã thực hiện trong môi trường thực hành:
+Lệnh kiểm thử cơ bản:
 
 ```powershell
 docker compose exec nginx nginx -t
-docker compose exec nginx nginx -s reload
-curl.exe -I http://localhost
+curl.exe -I http://localhost/
 curl.exe -s -o NUL -w "%{http_code}`n" http://localhost/.env
 ```
 
-Kết quả ghi nhận: website HTTP `200`; đủ ba security headers; `/.env` trả `403`. Bài kiểm tra 60 request đồng thời ghi nhận **22 phản hồi HTTP 200 và 38 phản hồi HTTP 429**, chứng minh rate limiting hoạt động tại thời điểm kiểm thử.
+Kỳ vọng: website HTTP `200` (trừ khi bị giới hạn tạm thời), có ba security headers, `/.env` bị chặn (thường `403`). Với rate limiting, kiểm tra nhiều request trong thời gian ngắn và xác nhận xuất hiện `429`; không dùng bài test tải nặng kéo dài trên máy yếu.
 
-**Giới hạn bảo mật:** Môi trường local hiện dùng HTTP, chưa cấu hình TLS/HTTPS; phản hồi PHP vẫn có thể tiết lộ `X-Powered-By`; chưa nên coi đây là hệ thống production hardened.
+**Giới hạn bảo mật cần công bố:** hiện sử dụng HTTP, chưa có TLS/HTTPS; cAdvisor chạy `privileged: true`; WordPress/PHP có thể lộ header nhận diện công nghệ; chưa cấu hình backup tự động, firewall/WAF hoặc quản lý bí mật chuyên dụng. Đây là **lab hardening**, không nên coi là triển khai production an toàn.
 
-## 10. Kiểm tra và xử lý sự cố
+## 10. Kiểm tra vận hành và xử lý lỗi
 
 ```powershell
-# Kiểm tra cấu hình Compose
+# Xác nhận Compose hợp lệ
 docker compose config --quiet
 
-# Xem trạng thái container
+# Trạng thái dịch vụ
 docker compose ps
 
-# Kiểm tra cấu hình Nginx
+# Nginx config và website
 docker compose exec nginx nginx -t
+curl.exe -I http://localhost/
 
-# Xem log gần nhất
-docker compose logs --tail 50 nginx
-docker compose logs --tail 50 promtail
-docker compose logs --tail 50 loki
-docker compose logs --tail 50 nginx-exporter
+# Log chẩn đoán
+docker compose logs --tail=50 nginx
+docker compose logs --tail=50 wordpress
+docker compose logs --tail=50 mysql
+docker compose logs --tail=50 nginx-exporter
+docker compose logs --tail=50 mysql-exporter
+docker compose logs --tail=50 loki
+docker compose logs --tail=50 promtail
 ```
 
-Nếu Nginx Exporter không có `wget`, đó chỉ là do image tối giản. Kiểm tra trực tiếp tại Prometheus Targets hoặc truy vấn `nginx_up` thay vì cài công cụ vào container.
+| Triệu chứng | Kiểm tra/khắc phục |
+|---|---|
+| `docker compose config` báo biến thiếu | Kiểm tra `.env` và tên biến Grafana/MySQL |
+| MySQL không `healthy` | `docker compose logs mysql`; kiểm tra volume và mật khẩu lần khởi tạo |
+| MySQL Exporter `mysql_up=0` | Kiểm tra tài khoản/grants, mật khẩu `.my.cnf`, kết nối `host=mysql` |
+| Nginx Exporter `nginx_up=0` | Kiểm tra `nginx -t`, endpoint nội bộ `/stub_status` và mạng `edge` |
+| Grafana không thấy metrics | Kiểm tra datasource `http://prometheus:9090`, Prometheus Targets, dashboard import |
+| Grafana không thấy log | Kiểm tra `access.log` là file thực, log Promtail/Loki, datasource `http://loki:3100` và time range |
+| cAdvisor thiếu metrics từng container | Có thể là giới hạn Docker Desktop/Windows; dùng metrics tổng hợp và ghi rõ hạn chế |
+| HTTP 429 khi truy cập liên tục | Rate limiting đang hoạt động; đợi rồi thử lại |
+| Không mở được phpMyAdmin từ host | Cấu hình hiện tại chưa publish port/route cho phpMyAdmin |
 
-## 11. Bảo toàn dữ liệu
+## 11. Lưu trữ và bảo toàn dữ liệu
 
-Các volume chính: `mysql_data`, `wordpress_data`, `prometheus_data`, `grafana_data`, `nginx_logs`, `loki_data`, `promtail_positions`.
-
-Để dừng và chạy lại mà vẫn giữ volume:
+Named volumes: `mysql_data`, `wordpress_data`, `prometheus_data`, `grafana_data`, `nginx_logs`, `loki_data`, `promtail_positions`.
 
 ```powershell
+# Dừng và xóa container/network, vẫn giữ named volumes
 docker compose down
+
+# Khởi động lại với dữ liệu hiện có
 docker compose up -d
 ```
 
-**Không dùng `docker compose down -v` hoặc `docker volume prune`** nếu muốn giữ bài viết WordPress, cơ sở dữ liệu, dashboard và log. Với dữ liệu quan trọng, cần có bản sao lưu riêng trước khi thay đổi cấu hình hoặc nâng cấp image.
+**Không chạy `docker compose down -v` hoặc `docker volume prune`** nếu muốn giữ dữ liệu WordPress, MySQL, Grafana, Prometheus và Loki. Volume **không thay thế bản sao lưu**; cần backup MySQL và dữ liệu WordPress trước khi xóa volume/nâng cấp.
+
+Lưu ý: sửa `MYSQL_PASSWORD` trong `.env` sau khi MySQL đã khởi tạo **không tự đổi mật khẩu tài khoản đang lưu trong database**. Cần thay đổi tương ứng trong MySQL nếu muốn cập nhật credential.
 
 ## 12. Quy trình Git
 
-Dự án triển khai qua các nhánh tính năng và Pull Request:
+Repository: https://github.com/dtc245200382-sudo/DeTai19_WebsiteTinTuc
 
-- Giai đoạn 1: WordPress, MySQL, phpMyAdmin, Nginx Reverse Proxy.
-- Giai đoạn 2: Prometheus, Grafana và exporters – đã merge qua PR #1.
-- Giai đoạn 3: Loki, Promtail và LogQL – đã merge qua PR #2.
-- Giai đoạn 4: Nginx hardening – commit `212965b` trên nhánh `feature/detai19-hardening` (trạng thái merge cần kiểm tra lại trên GitHub).
+- Giai đoạn 1: WordPress + MySQL + phpMyAdmin + Nginx.
+- Giai đoạn 2: Prometheus + Grafana + exporters (PR #1).
+- Giai đoạn 3: Loki + Promtail + LogQL (PR #2).
+- Giai đoạn 4: Hardening Nginx; kiểm tra trạng thái merge của nhánh tương ứng trước khi ghi nhận là đã hợp nhất.
 
-Mỗi thay đổi mới nên được thực hiện trên nhánh `feature/*`, sau đó tạo Pull Request để kiểm tra trước khi merge vào `main`.
+Các thay đổi mới nên làm trên nhánh `feature/*`, commit, push nhánh feature rồi tạo Pull Request vào `main`. Không push trực tiếp vào `main`.
 
-## 13. Phạm vi và hướng phát triển
+Ví dụ:
 
-Dự án đáp ứng mục tiêu thực hành triển khai ứng dụng web, giám sát metrics, thu thập log tập trung và áp dụng hardening cơ bản. Những việc có thể bổ sung khi triển khai thực tế: HTTPS/TLS, giảm thông tin phiên bản PHP trong response, backup/restore định kỳ, phân quyền chặt hơn cho các dịch vụ, chuyển sang Grafana Alloy thay Promtail theo lộ trình vòng đời sản phẩm và cấu hình lưu trữ log phù hợp.
+```powershell
+git switch main
+git pull --ff-only origin main
+git switch -c docs/complete-readme
+# Chỉnh sửa README.md
+git add README.md
+git diff --cached --check
+git commit -m "docs: complete deployment and operations README"
+# Chỉ push khi đã kiểm tra và sẵn sàng tạo PR
+git push -u origin docs/complete-readme
+```
+
+## 13. Checklist nghiệm thu và ảnh minh chứng
+
+- [ ] `docker compose config --quiet` thành công; các container chính đang chạy.
+- [ ] Website truy cập được, đăng nhập WordPress Admin, có bài viết/chuyên mục minh họa.
+- [ ] Prometheus Targets `UP` cho Prometheus, Nginx Exporter, MySQL Exporter và cAdvisor.
+- [ ] Grafana có datasource Prometheus và dashboard thể hiện metrics.
+- [ ] Grafana có datasource Loki, Explore trả về log Nginx bằng LogQL.
+- [ ] Security headers, chặn `/.env` và rate limiting đã được kiểm thử.
+- [ ] README không chứa mật khẩu thật; `.env` và `.my.cnf` không được commit.
+- [ ] Báo cáo tối thiểu 10 trang có kiến trúc, bước triển khai, ảnh chụp, kiểm thử và hạn chế.
+
+Ảnh nên chuẩn bị: website WordPress; `docker compose ps`; Prometheus Targets; Grafana Dashboard; Grafana Explore với LogQL; kết quả HTTP headers/403/429; lịch sử commit/Pull Request.
+
+## 14. Giới hạn và hướng phát triển
+
+- Chưa có HTTPS/TLS và tên miền thực.
+- Chưa có backup/restore tự động và giám sát cảnh báo production.
+- Grafana datasource/dashboard chưa được provision tự động trên máy mới.
+- Cơ chế chuyển symlink log Nginx thành file thực còn thủ công.
+- cAdvisor trên Docker Desktop có thể thiếu metrics riêng của từng container.
+- Promtail đã hết hỗ trợ; có thể chuyển sang Grafana Alloy trong tương lai.
+- Cần giảm quyền container, rà soát cấu hình bí mật và bổ sung kiểm thử bảo mật trước khi triển khai Internet.
 
 ---
 
