@@ -67,6 +67,7 @@ services:
       - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_logs:/var/log/nginx
     networks:
       - edge
 
@@ -79,6 +80,31 @@ services:
       - nginx
     networks:
       - edge
+      - monitoring
+
+  loki:
+    image: grafana/loki:3.5.0
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/loki/loki-config.yml"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - monitoring
+
+  promtail:
+    image: grafana/promtail:3.5.0
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/promtail/promtail-config.yml"
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - nginx_logs:/var/log/nginx:ro
+      - promtail_positions:/positions
+    depends_on:
+      - loki
+    networks:
       - monitoring
 
   prometheus:
@@ -149,3 +175,6 @@ volumes:
   wordpress_data:
   prometheus_data:
   grafana_data:
+  nginx_logs:
+  loki_data:
+  promtail_positions:
