@@ -8,6 +8,11 @@
         <div class="meta">Bởi <?php the_author(); ?> · <time datetime="<?php echo esc_attr( get_the_date( DATE_W3C ) ); ?>"><?php echo esc_html( get_the_date() ); ?></time></div>
         <?php if ( has_post_thumbnail() && ! post_password_required() ) : ?><div class="article-cover"><?php the_post_thumbnail( 'large' ); ?></div><?php endif; ?>
         <div class="entry-content"><?php the_content(); wp_link_pages(); ?></div>
+        <div class="share-box">
+            <label for="article-link">Chia sẻ bài viết</label>
+            <div class="share-controls"><input id="article-link" type="url" readonly value="<?php echo esc_url( get_permalink() ); ?>"><button type="button" class="copy-link" hidden>Sao chép liên kết</button></div>
+            <p class="share-status" role="status" aria-live="polite">Bạn có thể chọn và sao chép liên kết ở trên.</p>
+        </div>
     </article>
     <?php if ( ! post_password_required() ) :
         $related = new WP_Query( array( 'post_type' => 'post', 'posts_per_page' => 3, 'post__not_in' => array( get_the_ID() ), 'category__in' => wp_get_post_categories( get_the_ID() ), 'ignore_sticky_posts' => true, 'no_found_rows' => true ) );

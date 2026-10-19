@@ -11,7 +11,7 @@
 <header class="site-header">
     <div class="container masthead">
         <a class="brand" href="<?php echo esc_url( home_url( '/' ) ); ?>"><?php bloginfo( 'name' ); ?><span>TIN TỨC &amp; CỔNG THÔNG TIN</span></a>
-        <span class="edition">Thông tin mới · Góc nhìn đa chiều</span>
+        <div class="header-search"><?php get_search_form(); ?></div>
     </div>
     <nav class="navigation" aria-label="Danh mục tin tức"><div class="container"><ul>
         <li><a href="<?php echo esc_url( home_url( '/' ) ); ?>">Trang chủ</a></li>
