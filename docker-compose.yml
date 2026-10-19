@@ -38,6 +38,7 @@ services:
         define('WP_SITEURL', 'http://localhost');
     volumes:
       - wordpress_data:/var/www/html
+      - ./wordpress/themes/detai19-news:/var/www/html/wp-content/themes/detai19-news:ro
     networks:
       - edge
       - data
